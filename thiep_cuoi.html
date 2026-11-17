@@ -117,7 +117,10 @@ body.view #mus.show{display:block}
 
 <section id="nhac">
   <h3>Nhạc nền</h3>
-  <label>Bài có sẵn (đặt file mp3 vào thư mục music/ cạnh file này)</label>
+  <label>Chọn file nhạc trên máy (khuyên dùng – nhạc được nhúng thẳng vào thiệp)</label>
+  <input type="file" id="songFile" accept="audio/*">
+  <p class="hint">Tối đa 3 MB (khoảng 3 phút mp3 128kbps). Khách mở link là nghe được, không cần thư mục nào đi kèm.</p>
+  <label>Hoặc bài có sẵn trong thư mục music/ (sẽ tự nhúng khi xuất thiệp nếu tìm thấy file)</label>
   <select id="songList">
     <option value="">-- Không nhạc --</option>
     <option value="music/nhac1.mp3">Bài 1</option>
@@ -126,10 +129,8 @@ body.view #mus.show{display:block}
   </select>
   <label>Hoặc dán link trực tiếp tới file mp3</label>
   <input id="songUrl" placeholder="https://.../bai-hat.mp3">
-  <label>Nghe thử file trên máy</label>
-  <input type="file" id="songFile" accept="audio/*">
-  <p class="hint">File chọn từ máy chỉ để nghe thử, không đi theo thiệp. Muốn khách nghe được, dùng bài trong music/ hoặc link mp3.</p>
-  <audio id="player" controls loop style="width:100%;margin-top:10px"></audio>
+  <p class="hint">Link phải kết thúc bằng .mp3 và cho phép tải trực tiếp. Link Google Drive, YouTube, Zing… thường không phát được.</p>
+  <audio id="player" controls loop preload="auto" style="width:100%;margin-top:10px"></audio>
 </section>
 
 <section id="anh">
@@ -150,10 +151,11 @@ body.view #mus.show{display:block}
 <section id="link">
   <h3>Xuất thiệp &amp; tạo link cho từng khách</h3>
   <ol style="font-size:14px;padding-left:20px">
-    <li>Bấm <b>Xuất thiệp</b> để tải về 1 file HTML đã nhúng sẵn ảnh, QR, thông tin.</li>
+    <li>Điền thông tin, thêm ảnh, nhạc, QR rồi bấm <b>Xuất thiệp</b> (tải về file <code>index.html</code>, đã nhúng sẵn ảnh + nhạc).</li>
     <li>Đưa file đó lên hosting (Netlify Drop, GitHub Pages…).</li>
-    <li>Mở trang đã đưa lên với đuôi <code>?edit=1</code>, dán danh sách khách và tạo link.</li>
+    <li>Mở trang đã đưa lên với đuôi <code>?edit=1</code>, dán danh sách khách và bấm <b>Tạo link</b>.</li>
   </ol>
+  <p class="hint"><b>Quan trọng:</b> chỉ tạo link ở trang đã đưa lên hosting. Link tạo từ file chưa xuất sẽ không có ảnh và nhạc.</p>
   <button class="btn" id="exp">⬇ Xuất thiệp</button>
   <label>Danh sách khách (mỗi dòng một tên)</label>
   <textarea id="guests" rows="5"></textarea>
@@ -172,7 +174,7 @@ const S={g:'Minh',b:'Lan',dt:'2026-12-20T11:00',p:'Nhà hàng ...',map:'',msg:'S
 /* 1. Dữ liệu nhúng (file đã xuất) rồi tới tham số URL */
 try{const E=$('data');if(E)Object.assign(S,JSON.parse(E.textContent))}catch(e){}
 const q=new URLSearchParams(location.search);
-for(const [u,k] of [['g','g'],['b','b'],['d','dt'],['p','p'],['k','k'],['m','map'],['s','song']])if(q.get(u))S[k]=q.get(u);
+for(const [u,k] of [['g','g'],['b','b'],['d','dt'],['p','p'],['k','k'],['m','map']])if(q.get(u))S[k]=q.get(u);
 if(TPL.includes(q.get('t')))S.t=q.get('t');
 const viewMode=($('data')||q.get('v')==='1')&&q.get('edit')!=='1';
 if(viewMode){document.body.classList.add('view');$('cover').classList.add('show');$('mus').classList.add('show')}
@@ -226,19 +228,40 @@ document.querySelectorAll('[data-k]').forEach(i=>{i.value=S[i.dataset.k]||'';i.o
 document.querySelectorAll('.tpls div').forEach(d=>d.onclick=()=>{S.t=d.dataset.t;render()});
 
 /* 4. Nhạc */
-const P=$('player');
-function setSong(u){S.song=u;if(P.getAttribute('src')!==u){u?P.setAttribute('src',u):P.removeAttribute('src')}}
-$('songList').onchange=e=>{setSong(e.target.value);$('songUrl').value='';if(S.song)P.play().catch(()=>{})};
-$('songUrl').oninput=e=>{const v=e.target.value.trim();if(!v||okUrl(v)){setSong(v);$('songList').value=''}};
-$('songFile').onchange=e=>{const f=e.target.files[0];if(f){P.src=URL.createObjectURL(f);P.play().catch(()=>{});toast('Đây chỉ là nghe thử')}};
-if(S.song){P.setAttribute('src',S.song);const o=[...$('songList').options].find(x=>x.value===S.song);o?$('songList').value=S.song:$('songUrl').value=S.song}
+const P=$('player'),MAXSONG=3*1024*1024;
+const isData=s=>typeof s==='string'&&s.startsWith('data:audio/');
+let blobUrl='';
+async function setSong(u){
+  S.song=u||'';P.pause();
+  if(blobUrl){URL.revokeObjectURL(blobUrl);blobUrl=''}
+  if(!u){P.removeAttribute('src');P.load();return}
+  if(isData(u)){ /* đổi sang blob URL cho Safari/iOS phát ổn định */
+    try{blobUrl=URL.createObjectURL(await (await fetch(u)).blob());P.src=blobUrl}catch(e){P.src=u}
+  }else P.src=u;
+}
+P.onerror=()=>{if(S.song)toast('Không tải được nhạc, hãy kiểm tra lại file/link')};
+$('songList').onchange=async e=>{await setSong(e.target.value);$('songUrl').value='';if(S.song)P.play().catch(()=>{})};
+$('songUrl').oninput=async e=>{const v=e.target.value.trim();if(!v||okUrl(v)){await setSong(v);$('songList').value=''}};
+$('songFile').onchange=e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  if(!f.type.startsWith('audio/')){toast('Đây không phải file nhạc');return}
+  if(f.size>MAXSONG){toast('File '+(f.size/1048576).toFixed(1)+' MB, tối đa 3 MB. Hãy cắt ngắn hoặc nén nhạc');return}
+  const r=new FileReader();
+  r.onload=async()=>{await setSong(r.result);$('songList').value='';$('songUrl').value='';P.play().catch(()=>{});toast('Đã nhúng nhạc vào thiệp')};
+  r.onerror=()=>toast('Không đọc được file nhạc');r.readAsDataURL(f);
+};
+if(S.song){setSong(S.song);if(!isData(S.song)){const o=[...$('songList').options].find(x=>x.value===S.song);o?$('songList').value=S.song:$('songUrl').value=S.song}}
 $('open').onclick=()=>{$('cover').classList.remove('show');if(S.song)P.play().catch(()=>{})};
 $('mus').onclick=()=>{if(!S.song){toast('Thiệp này chưa có nhạc');return}P.paused?P.play().catch(()=>{}):P.pause()};
 
 /* 5. Ảnh: thu nhỏ trước khi nhúng */
+async function loadBmp(f){
+  try{return await createImageBitmap(f)}
+  catch(e){const u=URL.createObjectURL(f);try{const i=new Image();i.src=u;await i.decode();return i}finally{setTimeout(()=>URL.revokeObjectURL(u),5000)}}
+}
 async function shrink(f,max,qual){
-  const bm=await createImageBitmap(f),r=Math.min(1,max/Math.max(bm.width,bm.height));
-  const c=document.createElement('canvas');c.width=Math.round(bm.width*r);c.height=Math.round(bm.height*r);
+  const bm=await loadBmp(f),w=bm.naturalWidth||bm.width,h=bm.naturalHeight||bm.height,r=Math.min(1,max/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.round(w*r);c.height=Math.round(h*r);
   c.getContext('2d').drawImage(bm,0,0,c.width,c.height);return c.toDataURL('image/jpeg',qual);
 }
 $('photos').onchange=async e=>{
@@ -258,37 +281,47 @@ $('qrFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;
   try{S.qr=await shrink(f,700,.9);render()}catch(x){toast('Không đọc được ảnh QR')}};
 $('rmQr').onclick=()=>{S.qr='';$('qrFile').value='';render()};
 
-/* 6. Xuất file thiệp (nhúng toàn bộ dữ liệu) */
-$('exp').onclick=()=>{
+/* 6. Xuất file thiệp (nhúng toàn bộ dữ liệu: ảnh, QR, nhạc) */
+const toDataUrl=b=>new Promise((ok,no)=>{const f=new FileReader();f.onload=()=>ok(f.result);f.onerror=no;f.readAsDataURL(b)});
+$('exp').onclick=async()=>{
+  const D={...S,k:'Quý khách'};
+  if(D.song&&!okUrl(D.song)&&!isData(D.song)){ /* đường dẫn tương đối: nhúng vào file */
+    try{
+      const r=await fetch(D.song);if(!r.ok)throw 0;const b=await r.blob();if(b.size>MAXSONG)throw 1;
+      D.song=(await toDataUrl(b)).replace(/^data:[^;,]*/,'data:audio/mpeg');
+    }catch(e){
+      if(!confirm('Không nhúng được nhạc "'+D.song+'" (file không tìm thấy, quá 3 MB, hoặc đang mở trực tiếp từ máy). Khách sẽ KHÔNG nghe được nhạc.\n\nNên bấm Hủy rồi chọn file nhạc ở tab Nhạc. Vẫn xuất không nhạc?'))return;
+      D.song='';
+    }
+  }
   const d=document.documentElement.cloneNode(true);
   const old=d.querySelector('#data');if(old)old.remove();
+  /* dọn bản sao: bỏ phần đã vẽ (ảnh) để file không bị phình gấp đôi */
+  ['gallery','thumbs','qrBox','cd','out'].forEach(i=>{const e=d.querySelector('#'+i);if(e)e.textContent=''});
+  d.querySelector('#player').removeAttribute('src');
+  d.querySelectorAll('.on,.show,.sel').forEach(e=>e.classList.remove('on','show','sel'));
+  d.querySelector('body').className='';
+  d.querySelector('#menu button[data-p="thiep"]').classList.add('on');d.querySelector('#thiep').classList.add('on');
   const s=document.createElement('script');s.id='data';s.type='application/json';
-  s.textContent=JSON.stringify(S).replace(/</g,'\\u003c');
+  s.textContent=JSON.stringify(D).replace(/</g,'\\u003c');
   d.querySelector('body').prepend(s);
   const html='<!doctype html>\n'+d.outerHTML;
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));
-  a.download='thiep-cuoi-'+(S.g+'-'+S.b).toLowerCase().replace(/[^a-z0-9]+/gi,'-')+'.html';
+  a.download='index.html';
   document.body.appendChild(a);a.click();a.remove();
-  toast('Đã xuất ('+Math.round(html.length/1024)+' KB)');
+  toast('Đã xuất index.html ('+(html.length/1048576).toFixed(1)+' MB)');
 };
 
-/* 7. Tạo link cho từng khách */
+/* 7. Tạo link ngắn cho từng khách: gốc?k=Tên */
 async function copy(t){try{await navigator.clipboard.writeText(t)}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}toast('Đã sao chép')}
 let LINKS=[];
 $('mk').onclick=()=>{
-  const base=location.href.split(/[?#]/)[0];
-  let w=[];
-  if(location.protocol==='file:')w.push('Bạn đang mở file trên máy nên link chỉ chạy trên máy này. Hãy đưa thiệp lên hosting rồi tạo link ở đó.');
-  if(!$('data')&&(S.photos.length||S.qr))w.push('Link tạo từ file chưa xuất sẽ KHÔNG có ảnh và QR. Hãy bấm Xuất thiệp, đưa file lên hosting, mở với ?edit=1 rồi tạo link.');
-  if(S.song&&!okUrl(S.song))w.push('Nhạc đang dùng đường dẫn music/...; hãy đưa thư mục music/ lên hosting cùng file thiệp, hoặc dùng link mp3 trực tiếp.');
-  $('warn').textContent=w.join(' ');
+  const o=$('out'),w=$('warn');o.textContent='';LINKS=[];
+  if(!$('data')){w.textContent='⚠ Trang này chưa phải file đã xuất nên link sẽ không có ảnh và nhạc. Hãy bấm "Xuất thiệp", đưa file index.html lên hosting, mở trang đó với ?edit=1 rồi tạo link.';return}
+  w.textContent=location.protocol==='file:'?'⚠ Bạn đang mở file trên máy nên link chỉ chạy trên máy này. Hãy đưa thiệp lên hosting rồi tạo link ở đó.':'';
+  const base=location.href.split(/[?#]/)[0].replace(/index\.html$/,'');
   const names=$('guests').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  LINKS=names.map(k=>{
-    const p=new URLSearchParams({k,v:'1'});
-    if(!$('data')){p.set('g',S.g);p.set('b',S.b);p.set('d',S.dt);p.set('p',S.p);p.set('t',S.t);if(S.map)p.set('m',S.map);if(S.song)p.set('s',S.song)}
-    return {k,u:base+'?'+p};
-  });
-  const o=$('out');o.textContent='';
+  LINKS=names.map(k=>({k,u:base+'?k='+encodeURIComponent(k).replace(/%20/g,'+')}));
   LINKS.forEach(l=>{const d=document.createElement('div');d.className='lk';
     const b=document.createElement('b');b.textContent=l.k;const u=document.createElement('div');u.textContent=l.u;
     const c=document.createElement('button');c.textContent='Sao chép';c.onclick=()=>copy(l.u);d.append(b,u,c);o.appendChild(d)});
