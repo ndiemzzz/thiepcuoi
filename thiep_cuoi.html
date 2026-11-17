@@ -172,7 +172,7 @@ const S={g:'Minh',b:'Lan',dt:'2026-12-20T11:00',p:'Nhà hàng ...',map:'',msg:'S
 /* 1. Dữ liệu nhúng (file đã xuất) rồi tới tham số URL */
 try{const E=$('data');if(E)Object.assign(S,JSON.parse(E.textContent))}catch(e){}
 const q=new URLSearchParams(location.search);
-for(const [u,k] of [['g','g'],['b','b'],['d','dt'],['p','p'],['k','k'],['m','map']])if(q.get(u))S[k]=q.get(u);
+for(const [u,k] of [['g','g'],['b','b'],['d','dt'],['p','p'],['k','k'],['m','map'],['s','song']])if(q.get(u))S[k]=q.get(u);
 if(TPL.includes(q.get('t')))S.t=q.get('t');
 const viewMode=($('data')||q.get('v')==='1')&&q.get('edit')!=='1';
 if(viewMode){document.body.classList.add('view');$('cover').classList.add('show');$('mus').classList.add('show')}
@@ -277,11 +277,15 @@ async function copy(t){try{await navigator.clipboard.writeText(t)}catch(e){const
 let LINKS=[];
 $('mk').onclick=()=>{
   const base=location.href.split(/[?#]/)[0];
-  $('warn').textContent=location.protocol==='file:'?'Bạn đang mở file trên máy nên link chỉ chạy trên máy này. Hãy đưa thiệp lên hosting rồi tạo link ở đó.':'';
+  let w=[];
+  if(location.protocol==='file:')w.push('Bạn đang mở file trên máy nên link chỉ chạy trên máy này. Hãy đưa thiệp lên hosting rồi tạo link ở đó.');
+  if(!$('data')&&(S.photos.length||S.qr))w.push('Link tạo từ file chưa xuất sẽ KHÔNG có ảnh và QR. Hãy bấm Xuất thiệp, đưa file lên hosting, mở với ?edit=1 rồi tạo link.');
+  if(S.song&&!okUrl(S.song))w.push('Nhạc đang dùng đường dẫn music/...; hãy đưa thư mục music/ lên hosting cùng file thiệp, hoặc dùng link mp3 trực tiếp.');
+  $('warn').textContent=w.join(' ');
   const names=$('guests').value.split('\n').map(s=>s.trim()).filter(Boolean);
   LINKS=names.map(k=>{
     const p=new URLSearchParams({k,v:'1'});
-    if(!$('data')){p.set('g',S.g);p.set('b',S.b);p.set('d',S.dt);p.set('p',S.p);p.set('t',S.t);if(S.map)p.set('m',S.map)}
+    if(!$('data')){p.set('g',S.g);p.set('b',S.b);p.set('d',S.dt);p.set('p',S.p);p.set('t',S.t);if(S.map)p.set('m',S.map);if(S.song)p.set('s',S.song)}
     return {k,u:base+'?'+p};
   });
   const o=$('out');o.textContent='';
